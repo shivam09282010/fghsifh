@@ -5,62 +5,59 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Global Video Call</title>
   <style>
-    body { font-family: Arial, sans-serif; background-color: #f0f0f0; text-align: center; padding: 10px; }
-    video { width: 45%; margin: 10px; border: 1px solid #ccc; border-radius: 5px; }
-    button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
-    #room-controls { margin: 20px; }
+    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; }
+    video { width: 45%; margin: 10px; border: 2px solid #000; border-radius: 10px; }
+    #controls { margin: 20px; }
+    button, input { font-size: 16px; padding: 10px; margin: 5px; }
   </style>
 </head>
 <body>
   <h1>Global Video Call</h1>
-  <div id="room-controls">
+  <div id="controls">
     <button id="create-room">Create Room</button>
+    <input id="room-id" placeholder="Room ID">
     <button id="join-room">Join Room</button>
-    <input id="room-id" placeholder="Enter Room ID" />
   </div>
-  <p id="room-display"></p>
   <video id="localVideo" autoplay muted></video>
   <video id="remoteVideo" autoplay></video>
-
   <script>
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const createRoomButton = document.getElementById('create-room');
     const joinRoomButton = document.getElementById('join-room');
-    const roomInput = document.getElementById('room-id');
-    const roomDisplay = document.getElementById('room-display');
+    const roomIdInput = document.getElementById('room-id');
 
-    let localStream, peerConnection, roomId;
-    const signalingServer = 'wss://ws.postman-echo.com/raw';
-    const stunServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-
+    let localStream, peerConnection;
+    const signalingServer = 'wss://signal.onwebchat.com';
+    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     const ws = new WebSocket(signalingServer);
 
-    ws.onmessage = async (event) => {
-      const message = JSON.parse(event.data);
-      if (message.type === 'offer') {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
+    ws.onmessage = async (message) => {
+      const data = JSON.parse(message.data);
+
+      if (data.type === 'offer') {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-        sendMessage({ type: 'answer', roomId, answer });
-      } else if (message.type === 'answer') {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer));
-      } else if (message.type === 'candidate') {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+        ws.send(JSON.stringify({ type: 'answer', room: data.room, answer }));
+      } else if (data.type === 'answer') {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+      } else if (data.type === 'candidate') {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
       }
     };
 
-    async function startLocalVideo() {
+    async function setupLocalStream() {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localVideo.srcObject = localStream;
     }
 
     function setupPeerConnection() {
-      peerConnection = new RTCPeerConnection(stunServers);
+      peerConnection = new RTCPeerConnection(config);
       localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          sendMessage({ type: 'candidate', roomId, candidate: event.candidate });
+          ws.send(JSON.stringify({ type: 'candidate', room: roomIdInput.value, candidate: event.candidate }));
         }
       };
       peerConnection.ontrack = (event) => {
@@ -68,32 +65,27 @@
       };
     }
 
-    function sendMessage(message) {
-      ws.send(JSON.stringify(message));
-    }
-
     createRoomButton.addEventListener('click', async () => {
-      await startLocalVideo();
+      await setupLocalStream();
       setupPeerConnection();
 
-      roomId = Math.random().toString(36).substr(2, 8);
-      roomDisplay.textContent = `Room ID: ${roomId}`;
-      roomDisplay.style.color = 'green';
+      const room = Math.random().toString(36).substring(2, 8);
+      roomIdInput.value = room;
+      ws.send(JSON.stringify({ type: 'create', room }));
 
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
-      sendMessage({ type: 'offer', roomId, offer });
+      ws.send(JSON.stringify({ type: 'offer', room, offer }));
     });
 
     joinRoomButton.addEventListener('click', async () => {
-      if (!roomInput.value.trim()) {
-        alert('Please enter a Room ID');
+      if (!roomIdInput.value.trim()) {
+        alert('Enter a valid Room ID!');
         return;
       }
-      roomId = roomInput.value.trim();
-      await startLocalVideo();
+      await setupLocalStream();
       setupPeerConnection();
-      sendMessage({ type: 'join', roomId });
+      ws.send(JSON.stringify({ type: 'join', room: roomIdInput.value }));
     });
   </script>
 </body>
