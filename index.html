@@ -64,22 +64,31 @@
         const signalingServer = new WebSocket('wss://signaling.simplewebrtc.com');
         const configuration = {
             iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
             ]
+        };
+
+        signalingServer.onopen = () => {
+            console.log("Connected to the signaling server");
         };
 
         signalingServer.onmessage = async (message) => {
             const data = JSON.parse(message.data);
+            console.log("Received message:", data);
 
             if (data.type === 'offer') {
+                console.log("Offer received");
                 if (!peerConnection) createPeerConnection();
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
                 const answer = await peerConnection.createAnswer();
                 await peerConnection.setLocalDescription(answer);
                 signalingServer.send(JSON.stringify({ type: 'answer', answer }));
             } else if (data.type === 'answer') {
+                console.log("Answer received");
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
             } else if (data.type === 'candidate') {
+                console.log("Candidate received");
                 if (peerConnection) {
                     await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
                 }
