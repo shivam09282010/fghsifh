@@ -64,10 +64,12 @@
         const signalingServer = new WebSocket('wss://signaling.simplewebrtc.com');
         const configuration = {
             iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+                { urls: 'stun:stun.stunprotocol.org' },
+                { urls: 'stun:stun4.l.google.com:19302' }
             ]
         };
+
+        const room = "myUniqueRoom"; // Replace with your unique room name
 
         signalingServer.onopen = () => {
             console.log("Connected to the signaling server");
@@ -75,7 +77,9 @@
 
         signalingServer.onmessage = async (message) => {
             const data = JSON.parse(message.data);
-            console.log("Received message:", data);
+
+            // Check if the message belongs to your room
+            if (data.room !== room) return;
 
             if (data.type === 'offer') {
                 console.log("Offer received");
@@ -83,7 +87,7 @@
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
                 const answer = await peerConnection.createAnswer();
                 await peerConnection.setLocalDescription(answer);
-                signalingServer.send(JSON.stringify({ type: 'answer', answer }));
+                signalingServer.send(JSON.stringify({ room, type: 'answer', answer }));
             } else if (data.type === 'answer') {
                 console.log("Answer received");
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
@@ -105,7 +109,7 @@
 
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
-                    signalingServer.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                    signalingServer.send(JSON.stringify({ room, type: 'candidate', candidate: event.candidate }));
                 }
             };
         }
@@ -120,7 +124,7 @@
 
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            signalingServer.send(JSON.stringify({ type: 'offer', offer }));
+            signalingServer.send(JSON.stringify({ room, type: 'offer', offer }));
         }
 
         startCallButton.addEventListener('click', startCall);
