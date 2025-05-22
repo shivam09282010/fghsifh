@@ -1,154 +1,119 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Global Video Call Platform</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f3f4f6;
-        }
-
-        video {
-            width: 45%;
-            margin: 10px;
-            border: 2px solid #ccc;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        #controls {
-            margin: 20px;
-        }
-
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 5px;
-            background-color: #4CAF50;
-            color: white;
-            cursor: pointer;
-        }
-
-        button:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>Standalone Video Call</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { display:flex; flex-direction:column; align-items:center; font-family:Arial; background:#f3f4f6; margin:0; height:100vh; justify-content:center;}
+    video { width:45%; margin:10px; border:2px solid #ccc; border-radius:8px; }
+    button { padding:8px 16px; font-size:16px; margin:8px; border:none; border-radius:4px; background:#007bff; color:#fff; cursor:pointer; }
+    button:disabled { background:#999; cursor:not-allowed; }
+    #controls { margin:12px; }
+    #room { display:none; }
+  </style>
 </head>
 <body>
-    <h1>Global Video Call</h1>
-    <div id="videos">
-        <video id="localVideo" autoplay muted></video>
-        <video id="remoteVideo" autoplay></video>
-    </div>
-    <div id="controls">
-        <button id="startCall">Start Call</button>
-    </div>
 
-    <script>
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
-        const startCallButton = document.getElementById('startCall');
+  <h2>Standalone Video Call</h2>
+  <video id="localVideo" autoplay muted></video>
+  <video id="remoteVideo" autoplay></video>
 
-        let localStream;
-        let peerConnection;
-        const signalingServer = new WebSocket('wss://signaling.simplewebrtc.com'); // Replace if needed
-        const configuration = {
-            iceServers: [
-                { urls: 'stun:stun.stunprotocol.org' },
-                { urls: 'stun:stun4.l.google.com:19302' }
-            ]
-        };
+  <div id="controls">
+    <button id="createRoom">Create Room</button>
+    <button id="joinRoom">Join Room</button>
+  </div>
 
-        const room = "globalRoom123"; // Replace with your unique room name
+  <div id="room">
+    <p>Room ID: <span id="roomId"></span></p>
+    <input id="roomInput" placeholder="Enter Room ID to join" />
+    <button id="connect">Connect</button>
+  </div>
 
-        signalingServer.onopen = () => {
-            console.log("Connected to signaling server");
-            signalingServer.send(JSON.stringify({ type: 'join', room }));
-        };
+  <script>
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const createRoomBtn = document.getElementById('createRoom');
+    const joinRoomBtn = document.getElementById('joinRoom');
+    const roomDiv = document.getElementById('room');
+    const roomIdSpan = document.getElementById('roomId');
+    const roomInput = document.getElementById('roomInput');
+    const connectBtn = document.getElementById('connect');
 
-        signalingServer.onerror = (error) => {
-            console.error("WebSocket error:", error);
-        };
+    const peerConnectionConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
 
-        signalingServer.onmessage = async (message) => {
-            const data = JSON.parse(message.data);
+    let pc, localStream, roomId, ws;
 
-            if (data.room !== room) return;
+    // WebSocket setup
+    const WEBSOCKET_SERVER = "wss://ws.postman-echo.com/raw"; // Free WebSocket signaling server
 
-            switch (data.type) {
-                case 'offer':
-                    console.log("Received offer");
-                    if (!peerConnection) createPeerConnection();
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    signalingServer.send(JSON.stringify({ type: 'answer', room, answer }));
-                    break;
+    ws = new WebSocket(WEBSOCKET_SERVER);
 
-                case 'answer':
-                    console.log("Received answer");
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-                    break;
+    ws.onmessage = async (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendMessage({ type: 'answer', roomId, answer });
+      } else if (data.type === 'answer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      } else if (data.type === 'candidate') {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      }
+    };
 
-                case 'candidate':
-                    console.log("Received candidate");
-                    if (peerConnection) {
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                    }
-                    break;
+    async function setupUserMedia() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+    }
 
-                default:
-                    console.log("Unknown message type:", data.type);
-            }
-        };
-
-        function createPeerConnection() {
-            console.log("Creating peer connection");
-            peerConnection = new RTCPeerConnection(configuration);
-
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    signalingServer.send(JSON.stringify({ type: 'candidate', room, candidate: event.candidate }));
-                }
-            };
-
-            peerConnection.ontrack = (event) => {
-                console.log("Received remote stream");
-                remoteVideo.srcObject = event.streams[0];
-            };
-
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    async function setupPeerConnection() {
+      pc = new RTCPeerConnection(peerConnectionConfig);
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      pc.onicecandidate = event => {
+        if (event.candidate) {
+          sendMessage({ type: 'candidate', roomId, candidate: event.candidate });
         }
+      };
+      pc.ontrack = event => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+    }
 
-        async function startCall() {
-            startCallButton.disabled = true;
+    function sendMessage(message) {
+      ws.send(JSON.stringify(message));
+    }
 
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = localStream;
+    createRoomBtn.onclick = async () => {
+      await setupUserMedia();
+      await setupPeerConnection();
 
-                createPeerConnection();
+      roomId = Math.random().toString(36).substring(2, 10);
+      roomIdSpan.textContent = roomId;
+      roomDiv.style.display = 'block';
 
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                signalingServer.send(JSON.stringify({ type: 'offer', room, offer }));
-                console.log("Offer sent");
-            } catch (error) {
-                console.error("Error starting call:", error);
-            }
-        }
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      sendMessage({ type: 'offer', roomId, offer });
+    };
 
-        startCallButton.addEventListener('click', startCall);
-    </script>
+    joinRoomBtn.onclick = () => {
+      roomDiv.style.display = 'block';
+    };
+
+    connectBtn.onclick = async () => {
+      await setupUserMedia();
+      await setupPeerConnection();
+
+      roomId = roomInput.value.trim();
+      sendMessage({ type: 'join', roomId });
+    };
+  </script>
 </body>
 </html>
