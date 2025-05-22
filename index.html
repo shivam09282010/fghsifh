@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Video Call Platform</title>
+    <title>Global Video Call Platform</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -45,7 +45,7 @@
     </style>
 </head>
 <body>
-    <h1>Simple Video Call</h1>
+    <h1>Global Video Call</h1>
     <div id="videos">
         <video id="localVideo" autoplay muted></video>
         <video id="remoteVideo" autoplay></video>
@@ -61,7 +61,7 @@
 
         let localStream;
         let peerConnection;
-        const signalingServer = new WebSocket('wss://signaling.simplewebrtc.com');
+        const signalingServer = new WebSocket('wss://signaling.simplewebrtc.com'); // Replace if needed
         const configuration = {
             iceServers: [
                 { urls: 'stun:stun.stunprotocol.org' },
@@ -69,62 +69,83 @@
             ]
         };
 
-        const room = "myUniqueRoom"; // Replace with your unique room name
+        const room = "globalRoom123"; // Replace with your unique room name
 
         signalingServer.onopen = () => {
-            console.log("Connected to the signaling server");
+            console.log("Connected to signaling server");
+            signalingServer.send(JSON.stringify({ type: 'join', room }));
+        };
+
+        signalingServer.onerror = (error) => {
+            console.error("WebSocket error:", error);
         };
 
         signalingServer.onmessage = async (message) => {
             const data = JSON.parse(message.data);
 
-            // Check if the message belongs to your room
             if (data.room !== room) return;
 
-            if (data.type === 'offer') {
-                console.log("Offer received");
-                if (!peerConnection) createPeerConnection();
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                signalingServer.send(JSON.stringify({ room, type: 'answer', answer }));
-            } else if (data.type === 'answer') {
-                console.log("Answer received");
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            } else if (data.type === 'candidate') {
-                console.log("Candidate received");
-                if (peerConnection) {
-                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                }
+            switch (data.type) {
+                case 'offer':
+                    console.log("Received offer");
+                    if (!peerConnection) createPeerConnection();
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    signalingServer.send(JSON.stringify({ type: 'answer', room, answer }));
+                    break;
+
+                case 'answer':
+                    console.log("Received answer");
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    break;
+
+                case 'candidate':
+                    console.log("Received candidate");
+                    if (peerConnection) {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    }
+                    break;
+
+                default:
+                    console.log("Unknown message type:", data.type);
             }
         };
 
         function createPeerConnection() {
+            console.log("Creating peer connection");
             peerConnection = new RTCPeerConnection(configuration);
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-            peerConnection.ontrack = (event) => {
-                remoteVideo.srcObject = event.streams[0];
-            };
 
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
-                    signalingServer.send(JSON.stringify({ room, type: 'candidate', candidate: event.candidate }));
+                    signalingServer.send(JSON.stringify({ type: 'candidate', room, candidate: event.candidate }));
                 }
             };
+
+            peerConnection.ontrack = (event) => {
+                console.log("Received remote stream");
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
         }
 
         async function startCall() {
             startCallButton.disabled = true;
 
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            localVideo.srcObject = localStream;
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
 
-            createPeerConnection();
+                createPeerConnection();
 
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            signalingServer.send(JSON.stringify({ room, type: 'offer', offer }));
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                signalingServer.send(JSON.stringify({ type: 'offer', room, offer }));
+                console.log("Offer sent");
+            } catch (error) {
+                console.error("Error starting call:", error);
+            }
         }
 
         startCallButton.addEventListener('click', startCall);
