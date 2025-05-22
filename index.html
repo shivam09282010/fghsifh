@@ -61,7 +61,7 @@
 
         let localStream;
         let peerConnection;
-        const signalingServer = new WebSocket('wss://signaling.simplewebrtc.com'); // Using SimpleWebRTC's free signaling server
+        const signalingServer = new WebSocket('wss://signaling.simplewebrtc.com');
         const configuration = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' }
@@ -72,6 +72,7 @@
             const data = JSON.parse(message.data);
 
             if (data.type === 'offer') {
+                if (!peerConnection) createPeerConnection();
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
                 const answer = await peerConnection.createAnswer();
                 await peerConnection.setLocalDescription(answer);
@@ -79,16 +80,13 @@
             } else if (data.type === 'answer') {
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
             } else if (data.type === 'candidate') {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                if (peerConnection) {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                }
             }
         };
 
-        async function startCall() {
-            startCallButton.disabled = true;
-
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            localVideo.srcObject = localStream;
-
+        function createPeerConnection() {
             peerConnection = new RTCPeerConnection(configuration);
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
@@ -101,6 +99,15 @@
                     signalingServer.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
                 }
             };
+        }
+
+        async function startCall() {
+            startCallButton.disabled = true;
+
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+
+            createPeerConnection();
 
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
